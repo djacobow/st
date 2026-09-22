@@ -66,7 +66,7 @@ CONFIG = {
             'description': 'git submodule sync',
             'shellcommands': [
                 'git submodule sync',
-                'git submodule update --init --recursive'
+                'git submodule update --init'
             ],
             'class': stlib.commands.shell.Shell
         },

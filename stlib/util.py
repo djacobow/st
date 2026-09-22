@@ -1,4 +1,5 @@
 import sys, os, glob, re
+from pathlib import PurePath
 
 from . import shell
 
@@ -26,37 +27,55 @@ def getSpecifierList(config, repo):
 
     return usage
 
-def fileGlob(paths, types, fpats = None):
-    found = []
-    for p in paths:
-        for t in types:
-            if fpats is None:
-                globstr = '{}/**/*.{}'.format(p['include'],t['suffix'])
-                new = glob.glob(globstr,recursive=True)
-                if p.get('exclude') is not None:
-                    new = filter(lambda x: not re.search(p['exclude'],x), new)
-                found += new
+def fileGlob(paths, types, fpats=None):
+    """Walk each scope once, pruning exclusions before collecting matches.
 
-                if len(t['grep_extra_glob']):
-                    for extra in t['grep_extra_glob']:
-                        globstr = r'{}/**/{}'.format(p['include'],extra)
-                        new = glob.glob(globstr, recursive=True)
-                        if p.get('exclude') is not None:
-                            new = filter(lambda x: not re.search(p['exclude'],x), new)
-                        found += new
+    Do not descend into directory symlinks discovered inside a scope. An
+    explicitly selected root may itself be a symlink. Ordinary file symlinks
+    remain searchable. Hidden directories retain glob's default exclusion;
+    hidden files require an explicitly dotted pattern.
+    """
+    patterns = []
+    for kind in types:
+        if fpats is None:
+            patterns.append('*.{}'.format(kind['suffix']))
+            patterns.extend(kind.get('grep_extra_glob', []))
+        else:
+            patterns.extend('*{}*.{}'.format(pat, kind['suffix'])
+                            for pat in fpats)
 
-            else:
-                for fpat in fpats:
-                    globstr = '{}/**/*{}*.{}'.format(p['include'],fpat,t['suffix'])
-                    new = glob.glob(globstr,recursive=True)
-                    if p.get('exclude') is not None:
-                        new = filter(lambda x: not re.search(p['exclude'],x), new)
-                    found += new
+    found = {}
+    for scope in paths:
+        exclude = re.compile(scope['exclude']) if scope.get('exclude') else None
 
-    foundhash = { x:1 for x in found }
-    return list(foundhash.keys())
+        def excluded(path, directory=False):
+            return exclude is not None and (
+                exclude.search(path) or
+                (directory and exclude.search(path + os.sep)))
 
-             
+        # Preserve wildcard include roots, but never recursively glob the tree.
+        for root in glob.glob(scope['include']):
+            root = os.path.normpath(root)
+            if excluded(root, directory=True):
+                continue
+            for directory, dirs, files in os.walk(root, followlinks=False):
+                dirs[:] = sorted(name for name in dirs
+                                 if not name.startswith('.')
+                                 and not os.path.islink(os.path.join(directory, name))
+                                 and not excluded(os.path.join(directory, name), True))
+                for name in sorted(files):
+                    path = os.path.join(directory, name)
+                    if excluded(path):
+                        continue
+                    relative = PurePath(os.path.relpath(path, root))
+                    if any(relative.match(pattern)
+                           and (not name.startswith('.') or
+                                PurePath(pattern).name.startswith('.'))
+                           for pattern in patterns):
+                        found[path] = None
+    return list(found)
+
+
 def makeTypeList(config, adict):
     ftypes = []
     for n in config['code_file_types']:

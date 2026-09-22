@@ -134,3 +134,23 @@ There are a lot of other options, to show context, to limit searches, etc.
 
 You can even use `st g` to find and replace text strings in your entire repo.
 
+
+### Search traversal
+
+Searches walk each selected directory tree once and prune regex-excluded
+subdirectories before entering them. Exclusions are matched against full paths;
+a directory is also checked with a trailing slash, so `/build/` excludes the
+entire build tree. File exclusions still apply individually.
+
+Directory symlinks encountered inside a search tree are not followed. This
+prevents cycles such as a generated project's dependency linking back to the
+repository root. To search a linked directory deliberately, select it as an
+include root. File symlinks remain searchable. Hidden directories are skipped;
+hidden files require an explicit dotted pattern such as `.st_config.py` in
+`grep_extra_glob`. Matches are deduplicated by path.
+
+Run the traversal regression tests with:
+
+```sh
+python3 -B -m unittest discover -s tests -v
+```
